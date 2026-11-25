@@ -154,7 +154,8 @@ export function audit(doc) {
     }
   }
 
-  const score = Math.max(0, 100 - issues.reduce((s, i) => s + IMPACT_WEIGHT[i.impact], 0))
+  const penalty = issues.reduce((s, i) => s + IMPACT_WEIGHT[i.impact], 0)
+  const score = Math.round(100 * Math.exp(-penalty / 142))
   const counts = { critical: 0, serious: 0, moderate: 0, minor: 0 }
   issues.forEach((i) => counts[i.impact]++)
   const order = { critical: 0, serious: 1, moderate: 2, minor: 3 }
