@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { audit, applyFix, serialize } from './rules.js'
+import { audit, applyFix, applyAllMechanical, serialize, grade, toMarkdown } from './rules.js'
 import { SAMPLES } from './sample.js'
 
 const KEY = 'accessicheck:v1'
@@ -14,7 +14,15 @@ const HL_CSS = `
 [data-ac-sel]{outline:4px solid #ffd23f!important;box-shadow:0 0 0 6px #14123a!important;position:relative;z-index:9}
 `
 
-function grade(n) { return n >= 90 ? 'A' : n >= 75 ? 'B' : n >= 60 ? 'C' : n >= 40 ? 'D' : 'F' }
+const store = {
+  get: () => { try { return localStorage.getItem(KEY) } catch { return null } },
+  set: (v) => { try { localStorage.setItem(KEY, v) } catch { /* private mode */ } },
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }))
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
 
 function Ring({ score }) {
   const r = 52, c = 2 * Math.PI * r
@@ -34,15 +42,20 @@ function Ring({ score }) {
 
 export default function App() {
   const names = Object.keys(SAMPLES)
-  const [source, setSource] = useState(() => localStorage.getItem(KEY) || SAMPLES[names[0]])
+  const [source, setSource] = useState(() => store.get() || SAMPLES[names[0]])
   const [live, setLive] = useState(source)
   const [result, setResult] = useState(null)
   const [filter, setFilter] = useState('all')
   const [sel, setSel] = useState(null)
   const [showAll, setShowAll] = useState(true)
   const frame = useRef(null)
+  const fileIn = useRef(null)
+  const [undo, setUndo] = useState([])
+  const [note, setNote] = useState('')
+  const [typed, setTyped] = useState('')
+  const prevScore = useRef(null)
 
-  useEffect(() => { const t = setTimeout(() => { setLive(source); localStorage.setItem(KEY, source) }, 500); return () => clearTimeout(t) }, [source])
+  useEffect(() => { const t = setTimeout(() => { setLive(source); store.set(source) }, 500); return () => clearTimeout(t) }, [source])
 
   const run = () => {
     const doc = frame.current?.contentDocument
@@ -65,10 +78,35 @@ export default function App() {
     }
   }, [result, showAll, sel])
 
-  const fix = (i) => {
-    const d = new DOMParser().parseFromString(source, 'text/html')
-    if (applyFix(d, i)) setSource(serialize(d))
+  const flash = (m) => { setNote(m); setTimeout(() => setNote(''), 3500) }
+  const change = (next, msg) => {
+    setUndo((u) => [...u.slice(-19), source])
+    prevScore.current = result ? result.score : null
+    setSource(next); setLive(next); store.set(next)
+    if (msg) flash(msg)
   }
+  const fix = (i, value) => {
+    const d = new DOMParser().parseFromString(source, 'text/html')
+    if (applyFix(d, i, value)) { change(serialize(d), 'Fix applied.'); setTyped('') }
+  }
+  const fixAll = () => {
+    const r = applyAllMechanical(source, result.issues)
+    if (r.count) change(r.source, `${r.count} fixes applied.`)
+  }
+  const undoLast = () => {
+    const prev = undo[undo.length - 1]
+    if (prev == null) return
+    setUndo(undo.slice(0, -1)); setSource(prev); setLive(prev); store.set(prev); flash('Undone.')
+  }
+  const load = (txt) => { change(txt); setSel(null); setFilter('all') }
+  const onFile = async (e) => {
+    const f = e.target.files[0]; e.target.value = ''
+    if (!f) return
+    if (f.size > 1_000_000) return flash('That file is over 1 MB. Paste a smaller page.')
+    load(await f.text()); flash(`Loaded ${f.name}.`)
+  }
+  const copyHtml = async () => { try { await navigator.clipboard.writeText(source); flash('HTML copied.') } catch { flash('Copy was blocked by the browser.') } }
+  const mechanical = result ? result.issues.filter((i) => i.auto).length : 0
 
   const shown = useMemo(() => (result ? result.issues.map((i, n) => ({ i, n })).filter(({ i }) => filter === 'all' || i.impact === filter) : []), [result, filter])
 
@@ -105,19 +143,28 @@ export default function App() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <label htmlFor="src" className="serif text-xl font-extrabold">Your HTML</label>
                 <div className="flex gap-2 flex-wrap">
-                  {names.map((n) => <button key={n} onClick={() => setSource(SAMPLES[n])} className="rounded-lg border border-night/20 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-hl/40">{n}</button>)}
+                  {names.map((n) => <button key={n} onClick={() => load(SAMPLES[n])} className="rounded-lg border border-night/20 bg-white px-3 py-1.5 text-sm font-semibold hover:bg-hl/40">{n}</button>)}
                 </div>
               </div>
               <textarea id="src" spellcheck={false} value={source} onInput={(e) => setSource(e.target.value)} className="mono mt-2 h-72 w-full resize-y rounded-xl border-2 border-night/20 bg-night p-3 text-[13px] leading-relaxed text-[#e8e6ff]" />
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold">
+                <button onClick={fixAll} disabled={!mechanical} className="rounded-lg bg-indigo px-3 py-1.5 text-white disabled:opacity-40">Fix all one-click issues ({mechanical})</button>
+                <button onClick={undoLast} disabled={!undo.length} className="rounded-lg border border-night/20 bg-white px-3 py-1.5 disabled:opacity-40">Undo</button>
+                <button onClick={copyHtml} className="rounded-lg border border-night/20 bg-white px-3 py-1.5">Copy HTML</button>
+                <button onClick={() => download('fixed.html', source, 'text/html')} className="rounded-lg border border-night/20 bg-white px-3 py-1.5">Download HTML</button>
+                <button onClick={() => fileIn.current.click()} className="rounded-lg border border-night/20 bg-white px-3 py-1.5">Open file</button>
+                <input ref={fileIn} type="file" accept=".html,.htm,text/html" onChange={onFile} className="sr-only" aria-label="Open an HTML file" tabIndex={-1} />
+              </div>
+              <p role="status" aria-live="polite" className="mt-1 h-5 text-sm font-semibold text-ok">{note}{!note && result && prevScore.current != null && prevScore.current !== result.score ? `Score ${prevScore.current} to ${result.score}.` : ''}</p>
             </section>
 
             <section id="issues" aria-label="Issues">
-              <h2 className="serif text-xl font-extrabold">Issues</h2>
+              <div className="flex items-center justify-between gap-2"><h2 className="serif text-xl font-extrabold">Issues</h2>{result && result.issues.length > 0 && <button onClick={() => download('accessibility-report.md', toMarkdown(result), 'text/markdown')} className="rounded-lg border border-night/20 bg-white px-3 py-1.5 text-sm font-semibold">Download report</button>}</div>
               {shown.length === 0 && result && <p className="mt-3 rounded-xl bg-white p-4 ring-1 ring-night/10">Nothing to show for this filter.</p>}
               <ul className="mt-3 space-y-3">
                 {shown.map(({ i, n }) => (
                   <li key={n + i.id + i.idx} className={`rounded-xl bg-white ring-1 ${sel === n ? 'ring-2 ring-indigo' : 'ring-night/10'}`}>
-                    <button onClick={() => setSel(sel === n ? null : n)} aria-expanded={sel === n} className="flex w-full items-start gap-3 p-4 text-left">
+                    <button onClick={() => { setTyped(''); setSel(sel === n ? null : n) }} aria-expanded={sel === n} className="flex w-full items-start gap-3 p-4 text-left">
                       <span className="mt-0.5 shrink-0 rounded-md px-2 py-0.5 text-xs font-bold text-white" style={{ background: IMPACT[i.impact].color }}>{IMPACT[i.impact].label}</span>
                       <span className="min-w-0 flex-1"><span className="block font-semibold">{i.title}</span><span className="mono mt-0.5 block text-xs text-night/60">WCAG {i.wcag} - {i.id}</span></span>
                     </button>
@@ -127,7 +174,15 @@ export default function App() {
                         <p><strong>Why it matters.</strong> {i.why}</p>
                         <p><strong>How to fix.</strong> {i.fix}</p>
                         {i.meta && <div className="flex items-center gap-3 text-xs"><span className="rounded px-2 py-1 mono" style={{ background: i.meta.bg, color: i.meta.fg, border: '1px solid #0002' }}>Now {i.meta.r.toFixed(2)}:1</span><span className="rounded px-2 py-1 mono" style={{ background: i.meta.bg, color: i.meta.sug, border: '1px solid #0002' }}>Fixed</span></div>}
-                        {i.auto && <button onClick={() => fix(i)} className="rounded-lg bg-indigo px-4 py-2 font-semibold text-white">Apply fix to my HTML</button>}
+                        {i.auto && <button onClick={() => fix(i)} className="rounded-lg bg-indigo px-4 py-2 font-semibold text-white">{i.auto === 'contrast' ? `Use ${i.meta.sug}` : 'Apply fix to my HTML'}</button>}
+                        {i.ask && (
+                          <form onSubmit={(e) => { e.preventDefault(); if (typed.trim()) fix(i, typed) }} className="flex flex-wrap items-center gap-2">
+                            <label className="font-semibold" htmlFor={`ask-${n}`}>{i.ask.label}</label>
+                            <input id={`ask-${n}`} value={typed} onInput={(e) => setTyped(e.target.value)} placeholder={i.ask.ph} className="min-w-0 flex-1 rounded-lg border-2 border-night/20 px-3 py-1.5" />
+                            <button disabled={!typed.trim()} className="rounded-lg bg-indigo px-4 py-2 font-semibold text-white disabled:opacity-40">Apply</button>
+                            {i.ask.skip && <button type="button" onClick={() => fix(i, '')} className="rounded-lg border border-night/20 px-3 py-2 font-semibold">{i.ask.skip}</button>}
+                          </form>
+                        )}
                       </div>
                     )}
                   </li>

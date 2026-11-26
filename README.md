@@ -4,11 +4,16 @@ A client-side accessibility checker. Paste HTML and get a WCAG audit with every 
 
 **Live demo:** https://malakmo7amed309.github.io/accessicheck/
 
-![Screenshot](docs/showcase.gif)
+![Screenshot](docs/screenshot.png)
 
 ## Standout feature
 
-The audit runs on the real, rendered page. Your HTML loads in a sandboxed preview frame (scripts off) and `src/rules.js` checks the live document, so colour contrast uses true computed styles and inherited backgrounds, not guesses from the source text. Each problem is outlined on the page in its impact colour, and selecting one in the list jumps to it. For low contrast it computes the exact ratio and suggests a passing colour. Mechanical issues (missing `lang`, missing title, positive `tabindex`, duplicate ids, disabled zoom) have an "Apply fix to my HTML" button that edits your source.
+The audit runs on the real, rendered page. Your HTML loads in a sandboxed preview frame (scripts off) and `src/rules.js` checks the live document, so colour contrast uses true computed styles and inherited backgrounds, not guesses from the source text. Each problem is outlined on the page in its impact colour, and selecting one in the list jumps to it. For low contrast it computes the exact ratio and suggests a passing colour. Fixes edit your HTML directly:
+
+- One click: missing `lang`, missing title, positive `tabindex`, duplicate ids, disabled zoom, autoplay media, focusable `aria-hidden` content, tables without header cells, and low contrast (it sets the suggested colour).
+- You type the words: image alt text (or mark it decorative), form labels, button and link names.
+- **Fix all one-click issues** applies every one-click fix at once and shows the score change. **Undo** steps back.
+- Copy or download the fixed HTML, download the issue list as a Markdown report, or open an `.html` file from disk.
 
 ## Rules (17)
 
@@ -25,6 +30,7 @@ Preact, Tailwind CSS 4, Vite (single-file build). Fonts: Fraunces, Inter and IBM
 ```
 npm install
 npm run dev
+npm test
 ```
 
 The build is one self-contained `dist/index.html`, which GitHub Pages serves from `docs/`.
