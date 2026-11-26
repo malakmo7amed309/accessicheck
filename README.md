@@ -4,7 +4,7 @@ A client-side accessibility checker. Paste HTML and get a WCAG audit with every 
 
 **Live demo:** https://malakmo7amed309.github.io/accessicheck/
 
-![Screenshot](docs/screenshot.png)
+![Screenshot](docs/showcase.gif)
 
 ## Standout feature
 
